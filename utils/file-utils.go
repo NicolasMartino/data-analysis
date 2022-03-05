@@ -24,21 +24,22 @@ func DeleteAllFilesFromDirectory(path string) []string {
 	return names
 }
 
-// Create two directories
-func CreateDirs() (inputPath string, outputPath string) {
+// Create two directories in the working directory from two names
+func CreateDirs() (inputFileName string, outputFileName string) {
 	wd, err := os.Getwd()
 	Check(err)
-	inputPath = filepath.Join(wd, "input")
-	outputPath = filepath.Join(wd, "output")
+	inputFileName = filepath.Join(wd, "input")
+	outputFileName = filepath.Join(wd, "output")
 
-	err = os.MkdirAll(inputPath, os.ModePerm)
+	err = os.MkdirAll(inputFileName, os.ModePerm)
 	Check(err)
-	err = os.MkdirAll(outputPath, os.ModePerm)
+	err = os.MkdirAll(outputFileName, os.ModePerm)
 	Check(err)
 
 	return
 }
 
+// Clean the thingy ms words adds sometimes to annoy me in csv files
 func CleanBom(s []string) []string {
 	if len(s) > 0 {
 		byteOrderMarkAsString := string('\uFEFF')

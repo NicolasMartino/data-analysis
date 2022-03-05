@@ -56,6 +56,13 @@ func main() {
 	inputUrlColumn := fromCSVCmd.Int("url-column", 0, "Input column where to find the urls")
 	csvSeparator := fromCSVCmd.String("csv-separator", ",", "Csv separator used")
 
+	// writing data
+	writingChannel := models.Channel{
+		Values: make(chan models.UrlInfo),
+		Err:    make(chan error),
+		Done:   make(chan bool),
+	}
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(1)
@@ -63,7 +70,9 @@ func main() {
 
 	fmt.Printf("Operation : %v\n", os.Args[0:])
 
-	var results []models.GetResult
+	var results []models.UrlInfo
+
+	go writeCsvFromChannel(&writingChannel)
 
 	switch os.Args[1] {
 	case getCmd.Name():
@@ -72,18 +81,17 @@ func main() {
 		}
 	case fromCSVCmd.Name():
 		if err := fromCSVCmd.Parse(os.Args[2:]); err == nil {
-			results = handleFromCSV(*filename, *inputUrlColumn, *csvSeparator, handleGet)
+			handleFromCSV(*filename, *inputUrlColumn, *csvSeparator, handleGet, writingChannel)
 		}
 	default:
 		printHelp()
 	}
 
 	fmt.Printf("Writing %v results to file\n", len(results))
-	writeToCsv(results)
 }
 
-//TODO should take a file as input
-func writeToCsv(values []models.GetResult) {
+//Create file write from channel to disk asynchronously
+func writeCsvFromChannel(writeChannel *models.Channel) (err error) {
 	path := filepath.Join(outputPath, "results.csv")
 	file, err := os.Create(path)
 	utils.Check(err)
@@ -103,21 +111,25 @@ func writeToCsv(values []models.GetResult) {
 	utils.Check(err)
 	writer.Flush()
 
-	for _, v := range values {
-		if v.RequestUrl != "" {
-			record := []string{v.RequestUrl, v.Status}
-			err := writer.Write(record)
+	for {
+		select {
+		case <-writeChannel.Done:
+			postWrite, err := file.Stat()
 			utils.Check(err)
+			fmt.Printf("wrote %d bytes to file %s\n", postWrite.Size(), file.Name())
+			return err
+		case lineToWrite := <-writeChannel.Values:
+			if lineToWrite.RequestUrl != "" {
+				record := []string{lineToWrite.RequestUrl, lineToWrite.Status}
+				err := writer.Write(record)
+				utils.Check(err)
+				writer.Flush()
+			}
 		}
 	}
-
-	postWrite, err := file.Stat()
-	utils.Check(err)
-
-	fmt.Printf("wrote %d bytes to file %s\n", postWrite.Size(), file.Name())
 }
 
-func handleGet(givenUrl string) (model models.GetResult) {
+func handleGet(givenUrl string) (model models.UrlInfo) {
 	fmt.Printf("Called get command with url: %v\n", givenUrl)
 
 	_, err := url.ParseRequestURI(givenUrl)
@@ -132,7 +144,7 @@ func handleGet(givenUrl string) (model models.GetResult) {
 	body, err := io.ReadAll(resp.Body)
 	utils.Check(err)
 
-	model = models.GetResult{
+	model = models.UrlInfo{
 		Status:     resp.Status,
 		RequestUrl: resp.Request.URL.String(),
 		Body:       string(body),
@@ -141,7 +153,7 @@ func handleGet(givenUrl string) (model models.GetResult) {
 }
 
 //TODO should split and readfromfile method should take a os.file as input
-func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, transformer models.Transformer) (result []models.GetResult) {
+func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, transformer models.Transformer, writingChannel models.Channel) {
 	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", filename, inputUrlColumn, csvSeparator)
 
 	extension := "csv"
@@ -170,10 +182,9 @@ func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, tra
 			//utils.Check(errors.New("could not find url column"))
 			utils.CheckFatal(errors.New("could not find url column"))
 		}
-		result = append(result, transformer(cleanedRecord[inputUrlColumn]))
+		result := transformer(cleanedRecord[inputUrlColumn])
+		writingChannel.Values <- result
 	}
-
-	return
 }
 
 func printHelp() {
