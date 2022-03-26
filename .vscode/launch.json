@@ -9,9 +9,10 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}",
+            "program": "${workspaceFolder}/src",
             //"args": ["from-csv", "-filename=test2"]
-            "args": ["get", "-url=https://google.com"]
+            //"args": ["get", "-url=https://google.com"]
+            "args": []
         }
     ]
 }

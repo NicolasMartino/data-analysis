@@ -1,10 +1,10 @@
 package models
 
 type Extractor func(channelToWriteTo Channel)
-type Transformer func(url string) UrlInfo
+type UrlInfoFetcher func(url string) UrlInfo
 
 type UrlInfo struct {
-	Status     string
+	Status     int
 	RequestUrl string
 	Body       string
 }
