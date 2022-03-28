@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/NicolasMartino/data-analysis/src/models"
 	"github.com/NicolasMartino/data-analysis/src/utils"
@@ -17,21 +18,18 @@ import (
 
 var inputPath string
 var outputPath string
+var urlInfoCache map[string]models.CacheUrlInfo
+var cacheLifespan time.Duration
 
 func main() {
+	//assign cache
+	urlInfoCache = make(map[string]models.CacheUrlInfo)
+	cacheLifespan = 250 * time.Millisecond
 	//Create Dirs if  none exist
 	inputPath, outputPath = utils.CreateDirs()
 
 	println("Simple data analysis program")
 	println("The goal is to get the status of an url with http get request from a cmd line parameter or a csv file\n")
-
-	//clean output directory
-	deletedFileNames := utils.DeleteAllFilesFromDirectory(outputPath)
-
-	if len(deletedFileNames) > 0 {
-		fmt.Printf("Cleaned directory: %v\n", outputPath)
-		fmt.Printf("Deleted %v files with names %+v", len(deletedFileNames), deletedFileNames)
-	}
 
 	//CMDS
 	getCmd := *flag.NewFlagSet("get", flag.ExitOnError)
@@ -66,7 +64,13 @@ func main() {
 		}
 	case fromCSVCmd.Name():
 		if err := fromCSVCmd.Parse(os.Args[2:]); err == nil {
-			handleFromCSV(*filename, *inputUrlColumn, *csvSeparator, handleGet)
+			csvFile := models.CsvFile{
+				Filename:       *filename,
+				InputUrlColumn: *inputUrlColumn,
+				CsvSeparator:   *csvSeparator,
+			}
+
+			handleFromCSV(csvFile)
 		}
 	default:
 		printHelp(getCmd, fromCSVCmd)
@@ -75,6 +79,25 @@ func main() {
 	fmt.Printf("Program has finished with no unrecoverable errors")
 }
 
+// TODO should be thread safe
+func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.UrlInfo) {
+
+	urlInfoValue, ok := urlInfoCache[givenUrl]
+	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
+		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
+		model = urlInfoValue.UrlInfo
+	} else {
+		model = fetcher(givenUrl)
+		urlInfoCache[givenUrl] = models.CacheUrlInfo{
+			UrlInfo:    model,
+			LastUpdate: time.Now(),
+		}
+	}
+
+	return model
+}
+
+// Request ressource form url
 func handleGet(givenUrl string) (model models.UrlInfo) {
 	fmt.Printf("Called get command with url: %v\n", givenUrl)
 
@@ -95,11 +118,20 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 		RequestUrl: resp.Request.URL.String(),
 		Body:       string(body),
 	}
+
 	return
 }
 
-//TODO should split and readfromfile method should take a os.file as input
-func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, fetcher models.UrlInfoFetcher) {
+// Handle operations on csv files
+func handleFromCSV(csvFile models.CsvFile) {
+	//clean output directory
+	deletedFileNames := utils.DeleteAllFilesFromDirectory(outputPath)
+
+	if len(deletedFileNames) > 0 {
+		fmt.Printf("Cleaned directory: %v\n", outputPath)
+		fmt.Printf("Deleted %v files with names %+v", len(deletedFileNames), deletedFileNames)
+	}
+
 	//handle file writing
 	writingChannel := models.Channel{
 		Values: make(chan models.UrlInfo),
@@ -109,19 +141,24 @@ func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, fet
 
 	go writeCsvFromChannel(&writingChannel)
 
-	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", filename, inputUrlColumn, csvSeparator)
+	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", csvFile.Filename, csvFile.InputUrlColumn, csvFile.CsvSeparator)
 
 	extension := "csv"
-	filepath := filepath.Join(inputPath, fmt.Sprintf("%v.%v", filename, extension))
+	filepath := filepath.Join(inputPath, fmt.Sprintf("%v.%v", csvFile.Filename, extension))
 
 	f, err := os.Open(filepath)
 	utils.CheckFatal(err)
 	// remember to close the file at the end of the program
 	defer f.Close()
 
+	parseCsv(f, csvFile, writingChannel)
+
+}
+
+func parseCsv(reader io.Reader, csvFile models.CsvFile, writingChannel models.Channel) {
 	// read csv values using csv.Reader
-	csvReader := csv.NewReader(f)
-	csvReader.Comma = ([]rune(csvSeparator))[0]
+	csvReader := csv.NewReader(reader)
+	csvReader.Comma = ([]rune(csvFile.CsvSeparator))[0]
 
 	for {
 		record, err := csvReader.Read()
@@ -133,11 +170,11 @@ func handleFromCSV(filename string, inputUrlColumn int, csvSeparator string, fet
 			utils.CheckFatal(err)
 		}
 		// do something with read line
-		if inputUrlColumn > len(cleanedRecord)-1 {
+		if csvFile.InputUrlColumn > len(cleanedRecord)-1 {
 			//utils.Check(errors.New("could not find url column"))
 			utils.CheckFatal(errors.New("could not find url column"))
 		}
-		result := fetcher(cleanedRecord[inputUrlColumn])
+		result := cacheUrlInfo(cleanedRecord[csvFile.InputUrlColumn], handleGet)
 		writingChannel.Values <- result
 	}
 }
