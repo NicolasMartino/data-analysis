@@ -25,8 +25,6 @@ func main() {
 	//assign cache
 	urlInfoCache = make(map[string]models.CacheUrlInfo)
 	cacheLifespan = 250 * time.Millisecond
-	//Create Dirs if  none exist
-	inputPath, outputPath = utils.CreateDirs()
 
 	println("Simple data analysis program")
 	println("The goal is to get the status of an url with http get request from a cmd line parameter or a csv file\n")
@@ -64,6 +62,9 @@ func main() {
 		}
 	case fromCSVCmd.Name():
 		if err := fromCSVCmd.Parse(os.Args[2:]); err == nil {
+			//Create Dirs if  none exist
+			inputPath, outputPath = utils.CreateDirs()
+
 			csvFile := models.CsvFile{
 				Filename:       *filename,
 				InputUrlColumn: *inputUrlColumn,
@@ -76,7 +77,7 @@ func main() {
 		printHelp(getCmd, fromCSVCmd)
 	}
 
-	fmt.Printf("Program has finished with no unrecoverable errors")
+	fmt.Printf("Program is done working")
 }
 
 // TODO should be thread safe
@@ -86,12 +87,12 @@ func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.
 	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
 		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
 		model = urlInfoValue.UrlInfo
-	} else {
-		model = fetcher(givenUrl)
-		urlInfoCache[givenUrl] = models.CacheUrlInfo{
-			UrlInfo:    model,
-			LastUpdate: time.Now(),
-		}
+		return
+	}
+	model = fetcher(givenUrl)
+	urlInfoCache[givenUrl] = models.CacheUrlInfo{
+		UrlInfo:    model,
+		LastUpdate: time.Now(),
 	}
 
 	return model
@@ -139,7 +140,8 @@ func handleFromCSV(csvFile models.CsvFile) {
 		Done:   make(chan bool),
 	}
 
-	go writeCsvFromChannel(&writingChannel)
+	path := filepath.Join(outputPath, "results.csv")
+	go writeCsvFromChannel(&writingChannel, path)
 
 	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", csvFile.Filename, csvFile.InputUrlColumn, csvFile.CsvSeparator)
 
@@ -153,6 +155,12 @@ func handleFromCSV(csvFile models.CsvFile) {
 
 	parseCsv(f, csvFile, writingChannel)
 
+	writingChannel.Done <- true
+
+	// print file infos
+	postWrite, err := os.Stat(path)
+	utils.Check(err)
+	fmt.Printf("Wrote %d bytes to file %s\n", postWrite.Size(), path)
 }
 
 func parseCsv(reader io.Reader, csvFile models.CsvFile, writingChannel models.Channel) {
@@ -177,22 +185,22 @@ func parseCsv(reader io.Reader, csvFile models.CsvFile, writingChannel models.Ch
 		result := cacheUrlInfo(cleanedRecord[csvFile.InputUrlColumn], handleGet)
 		writingChannel.Values <- result
 	}
+
 }
 
 //Create file write from channel to disk asynchronously
-func writeCsvFromChannel(writeChannel *models.Channel) (err error) {
-	path := filepath.Join(outputPath, "results.csv")
+func writeCsvFromChannel(writeChannel *models.Channel, path string) (err error) {
+
 	file, err := os.Create(path)
 	utils.Check(err)
 
 	defer file.Close()
 
 	writer := csv.NewWriter(file)
+	defer writer.Flush()
 	//TODO reuse csv separator
 	separatorAsRune := []rune(";")
 	writer.Comma = separatorAsRune[0]
-
-	defer writer.Flush()
 
 	//Write headers
 	record := []string{"URL", "Status"}
@@ -203,9 +211,7 @@ func writeCsvFromChannel(writeChannel *models.Channel) (err error) {
 	for {
 		select {
 		case <-writeChannel.Done:
-			postWrite, err := file.Stat()
-			utils.Check(err)
-			fmt.Printf("wrote %d bytes to file %s\n", postWrite.Size(), file.Name())
+			fmt.Printf("Done with writing to file:%s\n", path)
 			return err
 		case lineToWrite := <-writeChannel.Values:
 			if lineToWrite.RequestUrl != "" {

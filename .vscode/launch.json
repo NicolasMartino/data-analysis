@@ -10,9 +10,8 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/src",
-            //"args": ["from-csv", "-filename=test2"]
+            "args": ["from-csv", "-filename=testdata"]
             //"args": ["get", "-url=https://google.com"]
-            "args": []
         }
     ]
 }

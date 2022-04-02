@@ -2,6 +2,7 @@ package utils
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -24,14 +25,28 @@ func DeleteAllFilesFromDirectory(path string) []string {
 	return names
 }
 
-// Create two directories in the working directory from two names
-func CreateDirs() (inputFileName string, outputFileName string) {
+// Clumsily tries to find the root of the prj
+func GetWD() string {
 	wd, err := os.Getwd()
 	Check(err)
+
+	base := filepath.Base(wd)
+	if base == "src" {
+		wd = filepath.Join(wd, "..")
+		path.Clean(wd)
+	}
+
+	return wd
+}
+
+// Create two directories in the working directory from two names
+func CreateDirs() (inputFileName string, outputFileName string) {
+	wd := GetWD()
+
 	inputFileName = filepath.Join(wd, "input")
 	outputFileName = filepath.Join(wd, "output")
 
-	err = os.MkdirAll(inputFileName, os.ModePerm)
+	err := os.MkdirAll(inputFileName, os.ModePerm)
 	Check(err)
 	err = os.MkdirAll(outputFileName, os.ModePerm)
 	Check(err)
