@@ -65,13 +65,42 @@ func main() {
 			//Create Dirs if  none exist
 			inputPath, outputPath = utils.CreateDirs()
 
-			csvFile := models.CsvFile{
+			// Create input file objects
+			extension := "csv"
+			inputFilePath := filepath.Join(inputPath, fmt.Sprintf("%v.%v", *filename, extension))
+			inputFile, err := os.Open(inputFilePath)
+			utils.CheckFatal(err)
+			// remember to close the file at the end of the program
+			defer inputFile.Close()
+
+			inputCsvFile := models.InputCSVFile{
+				FileReader:     inputFile,
 				Filename:       *filename,
 				InputUrlColumn: *inputUrlColumn,
 				CsvSeparator:   *csvSeparator,
+				FilePath:       inputFilePath,
 			}
 
-			handleFromCSV(csvFile)
+			//Create outputfileObjects
+			outputFilePath := filepath.Join(outputPath, "results.csv")
+			outputFile, err := os.Create(outputFilePath)
+			utils.Check(err)
+
+			defer outputFile.Close()
+
+			outputCsvFile := models.OutputCsvFile{
+				FileWriter:   outputFile,
+				CsvSeparator: *csvSeparator,
+				Headers:      []string{"URL", "Status"},
+				FilePath:     outputFilePath,
+			}
+
+			handleFromCSV(inputCsvFile, outputCsvFile)
+
+			// print file infos
+			postWrite, err := os.Stat(outputFilePath)
+			utils.Check(err)
+			fmt.Printf("Wrote %d bytes to file %s\n", postWrite.Size(), outputFilePath)
 		}
 	default:
 		printHelp(getCmd, fromCSVCmd)
@@ -124,13 +153,13 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 }
 
 // Handle operations on csv files
-func handleFromCSV(csvFile models.CsvFile) {
+func handleFromCSV(inputCsvFile models.InputCSVFile, outputCsvFile models.OutputCsvFile) {
 	//clean output directory
 	deletedFileNames := utils.DeleteAllFilesFromDirectory(outputPath)
 
 	if len(deletedFileNames) > 0 {
 		fmt.Printf("Cleaned directory: %v\n", outputPath)
-		fmt.Printf("Deleted %v files with names %+v", len(deletedFileNames), deletedFileNames)
+		fmt.Printf("Deleted %v files with names %+v\n", len(deletedFileNames), deletedFileNames)
 	}
 
 	//handle file writing
@@ -140,32 +169,18 @@ func handleFromCSV(csvFile models.CsvFile) {
 		Done:   make(chan bool),
 	}
 
-	path := filepath.Join(outputPath, "results.csv")
-	go writeCsvFromChannel(&writingChannel, path)
+	go writeCsvFromChannel(&writingChannel, outputCsvFile)
 
-	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", csvFile.Filename, csvFile.InputUrlColumn, csvFile.CsvSeparator)
+	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", inputCsvFile.Filename, inputCsvFile.InputUrlColumn, inputCsvFile.CsvSeparator)
 
-	extension := "csv"
-	filepath := filepath.Join(inputPath, fmt.Sprintf("%v.%v", csvFile.Filename, extension))
-
-	f, err := os.Open(filepath)
-	utils.CheckFatal(err)
-	// remember to close the file at the end of the program
-	defer f.Close()
-
-	parseCsv(f, csvFile, writingChannel)
+	parseCsv(inputCsvFile, writingChannel)
 
 	writingChannel.Done <- true
-
-	// print file infos
-	postWrite, err := os.Stat(path)
-	utils.Check(err)
-	fmt.Printf("Wrote %d bytes to file %s\n", postWrite.Size(), path)
 }
 
-func parseCsv(reader io.Reader, csvFile models.CsvFile, writingChannel models.Channel) {
+func parseCsv(csvFile models.InputCSVFile, writingChannel models.Channel) {
 	// read csv values using csv.Reader
-	csvReader := csv.NewReader(reader)
+	csvReader := csv.NewReader(csvFile.FileReader)
 	csvReader.Comma = ([]rune(csvFile.CsvSeparator))[0]
 
 	for {
@@ -189,21 +204,16 @@ func parseCsv(reader io.Reader, csvFile models.CsvFile, writingChannel models.Ch
 }
 
 //Create file write from channel to disk asynchronously
-func writeCsvFromChannel(writeChannel *models.Channel, path string) (err error) {
+func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.OutputCsvFile) (err error) {
 
-	file, err := os.Create(path)
-	utils.Check(err)
-
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
+	writer := csv.NewWriter(outputCSVFile.FileWriter)
 	defer writer.Flush()
 	//TODO reuse csv separator
-	separatorAsRune := []rune(";")
+	separatorAsRune := []rune(outputCSVFile.CsvSeparator)
 	writer.Comma = separatorAsRune[0]
 
 	//Write headers
-	record := []string{"URL", "Status"}
+	record := outputCSVFile.Headers
 	err = writer.Write(record)
 	utils.Check(err)
 	writer.Flush()
@@ -211,7 +221,7 @@ func writeCsvFromChannel(writeChannel *models.Channel, path string) (err error) 
 	for {
 		select {
 		case <-writeChannel.Done:
-			fmt.Printf("Done with writing to file:%s\n", path)
+			fmt.Printf("Done with writing to file:%s\n", outputCSVFile.FilePath)
 			return err
 		case lineToWrite := <-writeChannel.Values:
 			if lineToWrite.RequestUrl != "" {

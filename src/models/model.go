@@ -1,6 +1,7 @@
 package models
 
 import (
+	"io"
 	"time"
 )
 
@@ -24,8 +25,17 @@ type Channel struct {
 	Done   chan bool
 }
 
-type CsvFile struct {
+type InputCSVFile struct {
 	Filename       string
+	FileReader     io.Reader
 	InputUrlColumn int
 	CsvSeparator   string
+	FilePath       string
+}
+
+type OutputCsvFile struct {
+	FileWriter   io.Writer
+	FilePath     string
+	CsvSeparator string
+	Headers      []string
 }
