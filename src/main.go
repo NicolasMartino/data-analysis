@@ -64,6 +64,7 @@ func main() {
 		if err := fromCSVCmd.Parse(os.Args[2:]); err == nil {
 			//Create Dirs if  none exist
 			inputPath, outputPath = utils.CreateDirs()
+			csvSeparatorAsRune := []rune(*csvSeparator)[0]
 
 			// Create input file objects
 			extension := "csv"
@@ -77,7 +78,7 @@ func main() {
 				FileReader:     inputFile,
 				Filename:       *filename,
 				InputUrlColumn: *inputUrlColumn,
-				CsvSeparator:   *csvSeparator,
+				CsvSeparator:   csvSeparatorAsRune,
 				FilePath:       inputFilePath,
 			}
 
@@ -90,7 +91,7 @@ func main() {
 
 			outputCsvFile := models.OutputCsvFile{
 				FileWriter:   outputFile,
-				CsvSeparator: *csvSeparator,
+				CsvSeparator: csvSeparatorAsRune,
 				Headers:      []string{"URL", "Status"},
 				FilePath:     outputFilePath,
 			}
@@ -116,14 +117,14 @@ func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.
 	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
 		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
 		model = urlInfoValue.UrlInfo
-		return
+		return model
 	}
+
 	model = fetcher(givenUrl)
 	urlInfoCache[givenUrl] = models.CacheUrlInfo{
 		UrlInfo:    model,
 		LastUpdate: time.Now(),
 	}
-
 	return model
 }
 
@@ -134,7 +135,7 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 	_, err := url.ParseRequestURI(givenUrl)
 	if err != nil {
 		utils.Check(err)
-		return
+		return model
 	}
 
 	resp, err := http.Get(givenUrl)
@@ -148,8 +149,7 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 		RequestUrl: resp.Request.URL.String(),
 		Body:       string(body),
 	}
-
-	return
+	return model
 }
 
 // Handle operations on csv files
@@ -181,7 +181,7 @@ func handleFromCSV(inputCsvFile models.InputCSVFile, outputCsvFile models.Output
 func parseCsv(csvFile models.InputCSVFile, writingChannel models.Channel) {
 	// read csv values using csv.Reader
 	csvReader := csv.NewReader(csvFile.FileReader)
-	csvReader.Comma = ([]rune(csvFile.CsvSeparator))[0]
+	csvReader.Comma = csvFile.CsvSeparator
 
 	for {
 		record, err := csvReader.Read()
@@ -209,8 +209,7 @@ func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.Outp
 	writer := csv.NewWriter(outputCSVFile.FileWriter)
 	defer writer.Flush()
 	//TODO reuse csv separator
-	separatorAsRune := []rune(outputCSVFile.CsvSeparator)
-	writer.Comma = separatorAsRune[0]
+	writer.Comma = outputCSVFile.CsvSeparator
 
 	//Write headers
 	record := outputCSVFile.Headers
@@ -225,6 +224,7 @@ func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.Outp
 			return err
 		case lineToWrite := <-writeChannel.Values:
 			if lineToWrite.RequestUrl != "" {
+				//TODO extract to ouputCsvFile as linewriter func type
 				record := []string{lineToWrite.RequestUrl, fmt.Sprint(lineToWrite.Status)}
 				err := writer.Write(record)
 				utils.Check(err)

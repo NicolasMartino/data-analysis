@@ -29,13 +29,13 @@ type InputCSVFile struct {
 	Filename       string
 	FileReader     io.Reader
 	InputUrlColumn int
-	CsvSeparator   string
+	CsvSeparator   rune
 	FilePath       string
 }
 
 type OutputCsvFile struct {
 	FileWriter   io.Writer
 	FilePath     string
-	CsvSeparator string
+	CsvSeparator rune
 	Headers      []string
 }
