@@ -62,3 +62,17 @@ func CleanBom(s []string) []string {
 	}
 	return s
 }
+
+// Finds all CSV files in a folder
+func FindFiles(path string, ext string) []string {
+	var files []string
+	filepath.Walk(path, func(path string, f os.FileInfo, _ error) error {
+		if !f.IsDir() {
+			if filepath.Ext(f.Name()) == ext {
+				files = append(files, f.Name())
+			}
+		}
+		return nil
+	})
+	return files
+}

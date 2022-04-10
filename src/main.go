@@ -10,20 +10,23 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/NicolasMartino/data-analysis/src/models"
+	"github.com/NicolasMartino/data-analysis/src/store"
 	"github.com/NicolasMartino/data-analysis/src/utils"
 )
 
 var inputPath string
 var outputPath string
-var urlInfoCache map[string]models.CacheUrlInfo
+var urlInfoCache store.SafeMap
 var cacheLifespan time.Duration
 
 func main() {
 	//assign cache
-	urlInfoCache = make(map[string]models.CacheUrlInfo)
+	urlInfoCache = *store.NewSafeMap()
 	cacheLifespan = 250 * time.Millisecond
 
 	println("Simple data analysis program")
@@ -66,42 +69,27 @@ func main() {
 			inputPath, outputPath = utils.CreateDirs()
 			csvSeparatorAsRune := []rune(*csvSeparator)[0]
 
-			// Create input file objects
-			extension := "csv"
-			inputFilePath := filepath.Join(inputPath, fmt.Sprintf("%v.%v", *filename, extension))
-			inputFile, err := os.Open(inputFilePath)
-			utils.CheckFatal(err)
-			// remember to close the file at the end of the program
-			defer inputFile.Close()
+			if *filename == "" {
+				filesInput := utils.FindFiles(inputPath, ".csv")
+				fmt.Printf("files input %v\n", filesInput)
+				if len(filesInput) != 0 {
+					var wg sync.WaitGroup
 
-			inputCsvFile := models.InputCSVFile{
-				FileReader:     inputFile,
-				Filename:       *filename,
-				InputUrlColumn: *inputUrlColumn,
-				CsvSeparator:   csvSeparatorAsRune,
-				FilePath:       inputFilePath,
+					for _, file := range filesInput {
+
+						wg.Add(1)
+						go func(file string) {
+							defer wg.Done()
+							handleFromCSV(csvSeparatorAsRune, file, *inputUrlColumn)
+						}(file)
+					}
+
+					wg.Wait()
+				}
+			} else {
+				handleFromCSV(csvSeparatorAsRune, *filename, *inputUrlColumn)
 			}
 
-			//Create outputfileObjects
-			outputFilePath := filepath.Join(outputPath, "results.csv")
-			outputFile, err := os.Create(outputFilePath)
-			utils.Check(err)
-
-			defer outputFile.Close()
-
-			outputCsvFile := models.OutputCsvFile{
-				FileWriter:   outputFile,
-				CsvSeparator: csvSeparatorAsRune,
-				Headers:      []string{"URL", "Status"},
-				FilePath:     outputFilePath,
-			}
-
-			handleFromCSV(inputCsvFile, outputCsvFile)
-
-			// print file infos
-			postWrite, err := os.Stat(outputFilePath)
-			utils.Check(err)
-			fmt.Printf("Wrote %d bytes to file %s\n", postWrite.Size(), outputFilePath)
 		}
 	default:
 		printHelp(getCmd, fromCSVCmd)
@@ -110,10 +98,10 @@ func main() {
 	fmt.Printf("Program is done working")
 }
 
-// TODO should be thread safe
+// Thread safe cache results
 func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.UrlInfo) {
 
-	urlInfoValue, ok := urlInfoCache[givenUrl]
+	urlInfoValue, ok := urlInfoCache.Load(givenUrl)
 	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
 		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
 		model = urlInfoValue.UrlInfo
@@ -121,10 +109,10 @@ func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.
 	}
 
 	model = fetcher(givenUrl)
-	urlInfoCache[givenUrl] = models.CacheUrlInfo{
+	urlInfoCache.Store(givenUrl, models.CacheUrlInfo{
 		UrlInfo:    model,
 		LastUpdate: time.Now(),
-	}
+	})
 	return model
 }
 
@@ -141,6 +129,11 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 	resp, err := http.Get(givenUrl)
 	utils.Check(err)
 
+	return TransformData(resp)
+}
+
+func TransformData(resp *http.Response) (model models.UrlInfo) {
+
 	body, err := io.ReadAll(resp.Body)
 	utils.Check(err)
 
@@ -149,11 +142,55 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 		RequestUrl: resp.Request.URL.String(),
 		Body:       string(body),
 	}
+
 	return model
 }
 
 // Handle operations on csv files
-func handleFromCSV(inputCsvFile models.InputCSVFile, outputCsvFile models.OutputCsvFile) {
+func handleFromCSV(csvSeparatorAsRune rune, filename string, inputUrlColumn int) {
+
+	// Create input file objects
+	extension := "csv"
+	var inputFilePath string
+	fmt.Printf("filename:%v\n", filename)
+	if strings.Index(filename, ".") == -1 {
+		inputFilePath = filepath.Join(inputPath, fmt.Sprintf("%v.%v", filename, extension))
+	} else {
+		inputFilePath = filepath.Join(inputPath, filename)
+	}
+
+	inputFile, err := os.Open(inputFilePath)
+	utils.CheckFatal(err)
+	// remember to close the file at the end of the program
+	defer inputFile.Close()
+
+	inputCsvFile := models.InputCSVFile{
+		FileReader:     inputFile,
+		Filename:       filename,
+		InputUrlColumn: inputUrlColumn,
+		CsvSeparator:   csvSeparatorAsRune,
+		FilePath:       inputFilePath,
+	}
+
+	//Create outputfileObjects
+	outputFilePath := filepath.Join(outputPath, filename+"_results.csv")
+	outputFile, err := os.Create(outputFilePath)
+	utils.Check(err)
+
+	defer outputFile.Close()
+
+	outputCsvFile := models.OutputCsvFile{
+		FileWriter:   outputFile,
+		CsvSeparator: csvSeparatorAsRune,
+		Headers:      []string{"URL", "Status"},
+		FilePath:     outputFilePath,
+	}
+
+	// print file infos
+	postWrite, err := os.Stat(outputFilePath)
+	utils.Check(err)
+	fmt.Printf("Wrote %d bytes to file %s\n", postWrite.Size(), outputFilePath)
+
 	//clean output directory
 	deletedFileNames := utils.DeleteAllFilesFromDirectory(outputPath)
 
@@ -208,7 +245,6 @@ func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.Outp
 
 	writer := csv.NewWriter(outputCSVFile.FileWriter)
 	defer writer.Flush()
-	//TODO reuse csv separator
 	writer.Comma = outputCSVFile.CsvSeparator
 
 	//Write headers

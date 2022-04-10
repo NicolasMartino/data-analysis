@@ -1,4 +1,5 @@
 test:
 	go test -v -cover ./...
-
-.PHONY: test
+build:
+	go build -o ./dist/ ./src/main.go 
+.PHONY: test build
