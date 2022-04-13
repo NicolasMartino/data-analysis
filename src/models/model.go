@@ -2,13 +2,11 @@ package models
 
 import (
 	"io"
-	"time"
 )
 
 type LineExtractor func(channelToWriteTo Channel)
 type UrlInfoFetcher func(url string) Data
 type LineWritor func(input Data) []string
-type HandleFromCsv func(csvSeparatorAsRune rune, filename string, inputUrlColumn int)
 
 type Data struct {
 	Status     int
@@ -17,8 +15,7 @@ type Data struct {
 }
 
 type CacheUrlInfo struct {
-	UrlInfo    Data
-	LastUpdate time.Time
+	UrlInfo Data
 }
 
 type Channel struct {

@@ -21,12 +21,10 @@ import (
 var inputPath string
 var outputPath string
 var urlInfoCache store.SafeMap
-var cacheLifespan time.Duration
 
 func main() {
 	//assign cache
-	urlInfoCache = *store.NewSafeMap()
-	cacheLifespan = 250 * time.Millisecond
+	urlInfoCache = *store.NewSafeMap(250 * time.Millisecond)
 
 	println("Simple data analysis program")
 	println("The goal is to get the status of an url with http get request from a cmd line parameter or a csv file\n")
@@ -102,18 +100,17 @@ func main() {
 func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.Data) {
 
 	urlInfoValue, ok := urlInfoCache.Load(givenUrl)
-	//TODO extract logic in the store
-	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
-		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
+	if ok {
+		fmt.Printf("Found cache value for url: %v \n", givenUrl)
 		model = urlInfoValue.UrlInfo
 		return model
 	}
 
 	model = fetcher(givenUrl)
 	urlInfoCache.Store(givenUrl, models.CacheUrlInfo{
-		UrlInfo:    model,
-		LastUpdate: time.Now(),
+		UrlInfo: model,
 	})
+
 	return model
 }
 
