@@ -9,36 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A test that shows that simple maps are unsafe
-func testUnsafeStore(t *testing.T) {
-	cache := make(map[string]models.CacheUrlInfo)
-
-	for i := 0; i < 5000; i++ {
-		value := fmt.Sprintf("test %o", i)
-		cache[fmt.Sprintf("%o", i)] = models.CacheUrlInfo{UrlInfo: models.UrlInfo{Body: value}}
-
-		go func(cache map[string]models.CacheUrlInfo, i int) {
-			value := fmt.Sprintf("test %o", i)
-			cache[fmt.Sprintf("%o", i)] = models.CacheUrlInfo{UrlInfo: models.UrlInfo{Body: value}}
-		}(cache, i)
-
-		require.Equal(t, value, cache[fmt.Sprintf("%o", i)].UrlInfo.Body)
-	}
-}
-func TestStoreConcurrentWrite(t *testing.T) {
+func TestStoreReadWrite(t *testing.T) {
 	cache := store.NewSafeMap()
 
-	for i := 0; i < 5000; i++ {
-		value := fmt.Sprintf("test %o", i)
-		cache.Store(fmt.Sprintf("%o", i), models.CacheUrlInfo{UrlInfo: models.UrlInfo{Body: value}})
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("test %o", i)
+		value := fmt.Sprintf("test %o-1", i)
+		cache.Store(key, models.CacheUrlInfo{UrlInfo: models.Data{Body: value}})
 
-		go func(cache *store.SafeMap, i int) {
-			value := fmt.Sprintf("test %o", i)
-			cache.Store(fmt.Sprintf("%o", i), models.CacheUrlInfo{UrlInfo: models.UrlInfo{Body: value}})
-		}(cache, i)
-
-		retrievedValue, err := cache.Load(fmt.Sprintf("%o", i))
-		require.Equal(t, true, err)
+		retrievedValue, ok := cache.Load(key)
+		require.True(t, ok)
 		require.Equal(t, value, retrievedValue.UrlInfo.Body)
 	}
 

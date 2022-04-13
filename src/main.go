@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +68,8 @@ func main() {
 			inputPath, outputPath = utils.CreateDirs()
 			csvSeparatorAsRune := []rune(*csvSeparator)[0]
 
+			//process all files in input directory
+			//each on a separate goroutine rail
 			if *filename == "" {
 				filesInput := utils.FindFiles(inputPath, ".csv")
 				fmt.Printf("files input %v\n", filesInput)
@@ -76,7 +77,6 @@ func main() {
 					var wg sync.WaitGroup
 
 					for _, file := range filesInput {
-
 						wg.Add(1)
 						go func(file string) {
 							defer wg.Done()
@@ -99,9 +99,10 @@ func main() {
 }
 
 // Thread safe cache results
-func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.UrlInfo) {
+func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.Data) {
 
 	urlInfoValue, ok := urlInfoCache.Load(givenUrl)
+	//TODO extract logic in the store
 	if ok && time.Since(urlInfoValue.LastUpdate) < cacheLifespan {
 		fmt.Printf("Found cache value for url: %v last updated %v ago\n", givenUrl, time.Since(urlInfoValue.LastUpdate))
 		model = urlInfoValue.UrlInfo
@@ -117,7 +118,7 @@ func cacheUrlInfo(givenUrl string, fetcher models.UrlInfoFetcher) (model models.
 }
 
 // Request ressource form url
-func handleGet(givenUrl string) (model models.UrlInfo) {
+func handleGet(givenUrl string) (model models.Data) {
 	fmt.Printf("Called get command with url: %v\n", givenUrl)
 
 	_, err := url.ParseRequestURI(givenUrl)
@@ -132,12 +133,12 @@ func handleGet(givenUrl string) (model models.UrlInfo) {
 	return TransformData(resp)
 }
 
-func TransformData(resp *http.Response) (model models.UrlInfo) {
+func TransformData(resp *http.Response) (model models.Data) {
 
 	body, err := io.ReadAll(resp.Body)
 	utils.Check(err)
 
-	model = models.UrlInfo{
+	model = models.Data{
 		Status:     resp.StatusCode,
 		RequestUrl: resp.Request.URL.String(),
 		Body:       string(body),
@@ -153,11 +154,7 @@ func handleFromCSV(csvSeparatorAsRune rune, filename string, inputUrlColumn int)
 	extension := "csv"
 	var inputFilePath string
 	fmt.Printf("filename:%v\n", filename)
-	if strings.Index(filename, ".") == -1 {
-		inputFilePath = filepath.Join(inputPath, fmt.Sprintf("%v.%v", filename, extension))
-	} else {
-		inputFilePath = filepath.Join(inputPath, filename)
-	}
+	inputFilePath = filepath.Join(inputPath, fmt.Sprintf("%v.%v", filename, extension))
 
 	inputFile, err := os.Open(inputFilePath)
 	utils.CheckFatal(err)
@@ -184,6 +181,9 @@ func handleFromCSV(csvSeparatorAsRune rune, filename string, inputUrlColumn int)
 		CsvSeparator: csvSeparatorAsRune,
 		Headers:      []string{"URL", "Status"},
 		FilePath:     outputFilePath,
+		LineWritor: func(input models.Data) []string {
+			return []string{input.RequestUrl, fmt.Sprint(input.Status)}
+		},
 	}
 
 	// print file infos
@@ -201,21 +201,21 @@ func handleFromCSV(csvSeparatorAsRune rune, filename string, inputUrlColumn int)
 
 	//handle file writing
 	writingChannel := models.Channel{
-		Values: make(chan models.UrlInfo),
+		Values: make(chan models.Data),
 		Err:    make(chan error),
 		Done:   make(chan bool),
 	}
 
-	go writeCsvFromChannel(&writingChannel, outputCsvFile)
+	go writeCSVFromChannel(&writingChannel, outputCsvFile)
 
 	fmt.Printf("Called from-csv command with params [%v, %v, %v]\n", inputCsvFile.Filename, inputCsvFile.InputUrlColumn, inputCsvFile.CsvSeparator)
 
-	parseCsv(inputCsvFile, writingChannel)
+	parseCSVLineByLine(inputCsvFile, writingChannel)
 
 	writingChannel.Done <- true
 }
 
-func parseCsv(csvFile models.InputCSVFile, writingChannel models.Channel) {
+func parseCSVLineByLine(csvFile models.InputCSVFile, writingChannel models.Channel) {
 	// read csv values using csv.Reader
 	csvReader := csv.NewReader(csvFile.FileReader)
 	csvReader.Comma = csvFile.CsvSeparator
@@ -241,7 +241,7 @@ func parseCsv(csvFile models.InputCSVFile, writingChannel models.Channel) {
 }
 
 //Create file write from channel to disk asynchronously
-func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.OutputCsvFile) (err error) {
+func writeCSVFromChannel(writeChannel *models.Channel, outputCSVFile models.OutputCsvFile) (err error) {
 
 	writer := csv.NewWriter(outputCSVFile.FileWriter)
 	defer writer.Flush()
@@ -260,8 +260,7 @@ func writeCsvFromChannel(writeChannel *models.Channel, outputCSVFile models.Outp
 			return err
 		case lineToWrite := <-writeChannel.Values:
 			if lineToWrite.RequestUrl != "" {
-				//TODO extract to ouputCsvFile as linewriter func type
-				record := []string{lineToWrite.RequestUrl, fmt.Sprint(lineToWrite.Status)}
+				record := outputCSVFile.LineWritor(lineToWrite)
 				err := writer.Write(record)
 				utils.Check(err)
 				writer.Flush()

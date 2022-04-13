@@ -69,7 +69,7 @@ func FindFiles(path string, ext string) []string {
 	filepath.Walk(path, func(path string, f os.FileInfo, _ error) error {
 		if !f.IsDir() {
 			if filepath.Ext(f.Name()) == ext {
-				files = append(files, f.Name())
+				files = append(files, strings.Split(f.Name(), ".")[0])
 			}
 		}
 		return nil

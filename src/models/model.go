@@ -5,22 +5,24 @@ import (
 	"time"
 )
 
-type Extractor func(channelToWriteTo Channel)
-type UrlInfoFetcher func(url string) UrlInfo
+type LineExtractor func(channelToWriteTo Channel)
+type UrlInfoFetcher func(url string) Data
+type LineWritor func(input Data) []string
+type HandleFromCsv func(csvSeparatorAsRune rune, filename string, inputUrlColumn int)
 
-type UrlInfo struct {
+type Data struct {
 	Status     int
 	RequestUrl string
 	Body       string
 }
 
 type CacheUrlInfo struct {
-	UrlInfo    UrlInfo
+	UrlInfo    Data
 	LastUpdate time.Time
 }
 
 type Channel struct {
-	Values chan UrlInfo
+	Values chan Data
 	Err    chan error
 	Done   chan bool
 }
@@ -38,4 +40,5 @@ type OutputCsvFile struct {
 	FilePath     string
 	CsvSeparator rune
 	Headers      []string
+	LineWritor   LineWritor
 }
