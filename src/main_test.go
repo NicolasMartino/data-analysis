@@ -19,9 +19,10 @@ func TestHandleGet(t *testing.T) {
 
 	defer svr.Close()
 
-	res := handleGet(svr.URL)
+	res, err := handleGet(svr.URL)
 
 	fmt.Printf("%v", res.Status)
+	require.NoError(t, err)
 	require.Equal(t, res.Status, http.StatusOK)
 	require.Equal(t, res.Body, expected)
 	require.Equal(t, res.RequestUrl, svr.URL)

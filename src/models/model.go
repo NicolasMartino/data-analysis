@@ -5,7 +5,7 @@ import (
 )
 
 type LineExtractor func(channelToWriteTo Channel)
-type UrlInfoFetcher func(url string) Data
+type UrlInfoFetcher func(url string) (Data, error)
 type LineWritor func(input Data) []string
 
 type Data struct {
